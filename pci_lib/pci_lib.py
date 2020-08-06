@@ -695,7 +695,18 @@ def shorten_pci_addr(pci_addr):
 
 def load_pci_ids():
     db = {}
-    with open('/usr/share/hwdata/pci.ids') as f:
+
+    fnlst = [
+        '/usr/share/hwdata/pci.ids',  # CentOS
+        '/usr/share/misc/pci.ids',  # Ubuntu
+    ]
+    for fn in fnlst:
+        if os.path.exists(fn):
+            break
+    else:
+        raise Exception(f'Could not find pci.ids file at {fnlst}, please run `update-pciids`')
+
+    with open(fn) as f:
         vid = None
         did = None
         for line in f:
