@@ -695,7 +695,21 @@ def shorten_pci_addr(pci_addr):
 
 def load_pci_ids():
     db = {}
-    with open('/usr/share/hwdata/pci.ids') as f:
+    pci_ids_locations = [
+        "/usr/share/hwdata/pci.ids",
+        "/usr/share/misc/pci.ids",
+    ]
+    pci_ids_location = None
+    for loc in pci_ids_locations:
+        if os.path.isfile(loc):
+            pci_ids_location = loc
+            break
+    if not pci_ids_location:
+        raise RuntimeError(
+            "No pci.ids file avail in %r" % pci_ids_locations
+        )
+
+    with open(pci_ids_location) as f:
         vid = None
         did = None
         for line in f:
