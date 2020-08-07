@@ -9,7 +9,6 @@ LICENSE file in the root directory of this source tree.
 
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-from pcicrawler.lib.constants import ROOT_UID_REQUIRED
 from pci_lib import (
     list_devices,
     map_pci_device,
@@ -183,7 +182,7 @@ def main(class_id, device, express_only, json, include_path, addr, tree,
     """
     if os.geteuid() != 0:
         print("error: pcicrawler must be run as root.", file=sys.stderr)
-        sys.exit(ROOT_UID_REQUIRED)
+        sys.exit(16) # Exit code for root required
 
     vid = None
     did = None

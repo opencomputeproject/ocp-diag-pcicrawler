@@ -10,7 +10,6 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-# from libfb.py.decorators import cached_property
 from collections import defaultdict, namedtuple
 from os.path import realpath
 from contextlib import contextmanager, closing
