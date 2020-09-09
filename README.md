@@ -33,6 +33,9 @@ Options:
                                   workwith --tree
   -x, --hexify / --no-hexify      Output vendor/device/class IDs as hex
                                   strings instead of numbers in JSON output
+  -a, --aer / --no-aer            Include PCIe Advanced Error Reporting (AER)
+                                  information when available - only provided
+                                  in JSON output
   --help                          Show this message and exit.
 ```
 
