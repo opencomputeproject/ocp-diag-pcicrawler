@@ -502,6 +502,49 @@ class PCIDevice(namedtuple('PCIDevice', ('device_name', 'vendor_id',
             return PCIExpressSlot(slotnum, presence, power, attn_led)
 
     @cached_property
+    def express_aer(self):
+        """
+        Retrieve the device's PCIe Advanced Error Reporting (AER) statistics,
+        if the device is AER capable and the kernel provides the corresponding
+        pseudo fs interface under /sys/bus/pci/devices/.  The information is
+        gleaned from the following files, when present:
+
+        For devices:
+        /sys/bus/pci/devices/<dev>/aer_dev_correctable
+        /sys/bus/pci/devices/<dev>/aer_dev_fatal
+        /sys/bus/pci/devices/<dev>/aer_dev_nonfatal
+
+        along with the following for Root Port error counts:
+        /sys/bus/pci/devices/<dev>/aer_rootport_total_err_cor
+        /sys/bus/pci/devices/<dev>/aer_rootport_total_err_fatal
+        /sys/bus/pci/devices/<dev>/aer_rootport_total_err_nonfatal
+
+        Returns a dictionary with device and rootport dictionaries containing
+        various key/value pairs or counts provided via the pseudo fs files.
+        Empty device/rootport dictionaries are not included and None is
+        returned when no AER information has been found.
+        """
+        if self.express_type is None:
+            return None
+        aer = {}
+        dev_stats = aer_dev_stats(self.device_name, ['aer_dev_correctable',
+                                                     'aer_dev_fatal',
+                                                     'aer_dev_nonfatal'])
+        if dev_stats is not None:
+            aer["device"] = dev_stats
+
+        if self.express_type == 'root_port':
+            rp_counts = aer_rootport_counts(self.device_name,
+                                            ['aer_rootport_total_err_cor',
+                                             'aer_rootport_total_err_fatal',
+                                             'aer_rootport_total_err_nonfatal'])
+            if rp_counts is not None:
+                aer["rootport"] = rp_counts
+        if len(aer) == 0:
+            return None
+        return aer
+
+    @cached_property
     def express_type(self):
         """
         @return PCI-Express device type, None if this is a PCI device.
@@ -594,6 +637,62 @@ def get_dmidecode_pci_slots():
     except Exception:
         pass
     return slotmap
+
+
+def aer_dev_stats(device_name, stat_names):
+    """Gather PCIe device AER information, when available."""
+    dev_stats = {}
+    device_name = expand_pci_addr(device_name)
+    if not device_name:
+        return None
+    for stat_name in stat_names:
+        filename = os.path.join(SYSFS_PCI_BUS_DEVICES, device_name, stat_name)
+        if not os.path.isfile(filename):
+            continue
+        with open(filename) as file_obj:
+            # For AER device stats we expect multiple lines, each with a key
+            # and value. For example:
+            #   RxErr 0
+            #   BadTLP 0
+            #   BadDLLP 0
+            stats = {}
+            for line in file_obj.readlines():
+                key, value = line.strip().split()
+                try:
+                    stats[key] = int(value)
+                except ValueError:
+                    pass
+            dev_stats[stat_name] = stats
+
+    if len(dev_stats) == 0:
+        return None
+    return dev_stats
+
+
+def aer_rootport_counts(device_name, count_names):
+    """Gather PCIe root port device AER error counts, when available."""
+    rootport_counts = {}
+    device_name = expand_pci_addr(device_name)
+    if not device_name:
+        return None
+    for count_name in count_names:
+        filename = os.path.join(SYSFS_PCI_BUS_DEVICES, device_name, count_name)
+        if not os.path.isfile(filename):
+            continue
+        with open(filename) as file_obj:
+            # For AER root port counts we expect a single line with
+            # the integer error count that is associated with the
+            # specific count_name.  We'll use the count_name for the
+            # value's key.
+            try:
+                rootport_counts[count_name] = int(file_obj.readline())
+            except ValueError:
+                pass
+
+    if len(rootport_counts) == 0:
+        return None
+
+    return rootport_counts
 
 
 def map_pci_device(device_name):

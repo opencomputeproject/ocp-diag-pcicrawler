@@ -24,7 +24,7 @@ import os
 import sys
 
 
-def jsonify(dev, hexify=False, vpd=False):
+def jsonify(dev, hexify=False, vpd=False, aer=False):
     jd = dev._asdict()
     exptype = dev.express_type
     explink = dev.express_link
@@ -53,6 +53,10 @@ def jsonify(dev, hexify=False, vpd=False):
     if vpd:
         if dev.vpd:
             jd['vpd'] = dev.vpd
+    if aer:
+        aer_info = dev.express_aer
+        if aer_info:
+            jd['aer'] = aer_info
     return jd
 
 
@@ -172,8 +176,11 @@ def no_scripting():
 @click.option('--hexify/--no-hexify', '-x', default=False,
               help='Output vendor/device/class IDs as hex '
                    'strings instead of numbers in JSON output')
+@click.option('--aer/--no-aer', '-a', default=False,
+              help='Include PCIe Advanced Error Reporting (AER) information '
+              'when available - only provided in JSON output')
 def main(class_id, device, express_only, json, include_path, addr, tree,
-            verbose, vpd, hexify):
+            verbose, vpd, hexify, aer):
     """
     Tool to display/filter/export information about PCI or PCI Express devices,
     as well as their topology.
@@ -234,7 +241,7 @@ def main(class_id, device, express_only, json, include_path, addr, tree,
         jdevs = {}
         for dev in devs:
             addr = dev.device_name
-            jdevs[addr] = jsonify(dev, hexify=hexify, vpd=vpd)
+            jdevs[addr] = jsonify(dev, hexify=hexify, vpd=vpd, aer=aer)
         click.echo(dumps(jdevs))
     else:
         no_scripting()
