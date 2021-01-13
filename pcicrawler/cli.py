@@ -152,35 +152,75 @@ def no_scripting():
 
 
 @click.command()  # noqa: C901
-@click.option('--class-id', '-c', default=None,
-              help='Only show devices matching this PCI class ID in hex, '
-                   'or one of: ' + ', '.join(CLASS_ALIASES.keys()))
-@click.option('--device', '-d', default=None,
-              help='Only show devices matching this PCI vendor/device ID, '
-                   '(syntax like vendor:device, or vendor:, in hex)')
-@click.option('--express-only/--no-express-only', '-e',
-              default=False, help='Only show PCIe devices')
-@click.option('--json/--no-json', '-j', default=False,
-              help='Output in JSON format')
-@click.option('--include-path/--no-include-path', '-p', default=False,
-              help='Include devices upstream of matched devices')
-@click.option('--addr', '-s', default=None,
-              help='Show device with this PCI address')
-@click.option('--tree/--no-tree', '-t', default=False,
-              help='Output as a tree')
-@click.option('--verbose/--no-verbose', '-v', default=False,
-              help='Show debugging output - not compatible with JSON/tree views')
-@click.option('--vpd/--no-vpd', '-V',
-              default=False, help='Include VPD data if present, does not work'
-                                  'with --tree')
-@click.option('--hexify/--no-hexify', '-x', default=False,
-              help='Output vendor/device/class IDs as hex '
-                   'strings instead of numbers in JSON output')
-@click.option('--aer/--no-aer', '-a', default=False,
-              help='Include PCIe Advanced Error Reporting (AER) information '
-              'when available - only provided in JSON output')
-def main(class_id, device, express_only, json, include_path, addr, tree,
-            verbose, vpd, hexify, aer):
+@click.option(
+    '--class-id',
+    '-c',
+    default=None,
+    help='Only show devices matching this PCI class ID in hex, '
+    'or one of: ' + ', '.join(CLASS_ALIASES.keys())
+)
+@click.option(
+    '--device',
+    '-d',
+    default=None,
+    help='Only show devices matching this PCI vendor/device ID, '
+    '(syntax like vendor:device, or vendor:, in hex)'
+)
+@click.option(
+    '--express-only/--no-express-only',
+    '-e',
+    default=False,
+    help='Only show PCIe devices'
+)
+@click.option(
+    '--json/--no-json', '-j', default=False, help='Output in JSON format'
+)
+@click.option(
+    '--include-path/--no-include-path',
+    '-p',
+    default=False,
+    help='Include devices upstream of matched devices'
+)
+@click.option(
+    '--addr', '-s', default=None, help='Show device with this PCI address'
+)
+@click.option('--tree/--no-tree', '-t', default=False, help='Output as a tree')
+@click.option(
+    '--verbose/--no-verbose',
+    '-v',
+    default=False,
+    help='Show debugging output - not compatible with JSON/tree views'
+)
+@click.option(
+    '--vpd/--no-vpd',
+    '-V',
+    default=False,
+    help='Include VPD data if present, does not work with --tree'
+)
+@click.option(
+    "--no-builtin",
+    is_flag=True,
+    default=False,
+    help="Exclude builtin root devices (defaults to true with --tree)"
+)
+@click.option(
+    '--hexify/--no-hexify',
+    '-x',
+    default=False,
+    help='Output vendor/device/class IDs as hex '
+    'strings instead of numbers in JSON output'
+)
+@click.option(
+    '--aer/--no-aer',
+    '-a',
+    default=False,
+    help='Include PCIe Advanced Error Reporting (AER) information '
+    'when available - only provided in JSON output'
+)
+def main(
+    class_id, device, express_only, json, include_path, addr, tree, verbose,
+    vpd, no_builtin, hexify, aer
+):
     """
     Tool to display/filter/export information about PCI or PCI Express devices,
     as well as their topology.
@@ -227,15 +267,17 @@ def main(class_id, device, express_only, json, include_path, addr, tree,
         devs = filter(lambda d: d.class_id == class_id, devs)
     if express_only:
         devs = filter(lambda d: d.express_link is not None, devs)
+    if no_builtin:
+        devs = filter(lambda d: d.parent or d.express_type == "root_port", devs)
 
     devs = set(devs)
     if include_path or tree:
+        # When asked to print a tree, include filtered devices parents
         for dev in devs.copy():
             devs |= set(dev.get_path())
 
     if tree:
         no_scripting()
-        # When asked to print a tree, include filtered devices parents
         print_tree(sorted(devs, key=lambda d: d.device_name))
     elif json:
         jdevs = {}
