@@ -19,7 +19,7 @@ from setuptools import setup, find_packages
 NAME = 'pcicrawler'
 DESCRIPTION = ('Open source tool to display/filter/export information about PCI'
     ' or PCI Express devices, as well as their topology.')
-URL = 'facebook.com'
+URL = 'https://github.com/facebook/pcicrawler'
 EMAIL = 'ashwinp@fb.com'
 AUTHOR = 'Ashwin Poojary'
 REQUIRES_PYTHON = '>=3.6.0'
