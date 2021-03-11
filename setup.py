@@ -23,7 +23,7 @@ URL = 'facebook.com'
 EMAIL = 'ashwinp@fb.com'
 AUTHOR = 'Ashwin Poojary'
 REQUIRES_PYTHON = '>=3.6.0'
-VERSION = None
+VERSION = "1.0.0" 
 
 # What packages are required for this module to be executed?
 REQUIRED = [
