@@ -127,7 +127,12 @@ python3 setup.py bdist_wheel
 ```
 
 ## Installing `pcicrawler`
-`pcicrawler` is a Python package and can be installed from within the directory with
+`pcicrawler` is available on PyPi and can be installed with pip:
+```bash
+pip install pcicrawler
+```
+
+Additionally, `pcicrawler` is a Python package and can be installed from within the directory with
 ```bash
 python3 setup.py install
 ```
