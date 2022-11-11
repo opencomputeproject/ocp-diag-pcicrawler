@@ -181,6 +181,7 @@ EXPRESS_SPEED = {
     2: "5GT/s",
     3: "8GT/s",
     4: "16GT/s",
+    5: "32GT/s",
 }
 
 
