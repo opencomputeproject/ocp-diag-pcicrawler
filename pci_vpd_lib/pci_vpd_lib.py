@@ -29,10 +29,10 @@ class VitalProductDataReader:
           be very slow.
     """
 
-    fields = OrderedDict()
-    identifier_string = None
-
     def __init__(self, vpd_path):
+        self.fields = OrderedDict()
+        self.identifier_string = None
+
         if os.path.exists(vpd_path):
             with io.FileIO(vpd_path, "rb") as inf:
                 self._read_vpd(inf)
