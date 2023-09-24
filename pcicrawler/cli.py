@@ -12,8 +12,11 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import copy
 import os
 import sys
+import socket
 from json import dumps
-
+import json
+from datetime import datetime
+from abc import abstractmethod
 import click
 from pci_lib import (
     defer_closes,
@@ -27,6 +30,7 @@ from pci_lib import (
 
 from pcicrawler.lib.constants import ROOT_UID_REQUIRED
 
+OCP_TEST_STEP_COUNTER = 0
 
 def jsonify(dev, hexify=False, vpd=False, aer=False):
     jd = dev._asdict()
@@ -63,6 +67,371 @@ def jsonify(dev, hexify=False, vpd=False, aer=False):
         if aer_info:
             jd["aer"] = aer_info
     return jd
+
+
+class ocp_output_obj(object):
+    def __init__(self, devs, json_file):
+        self._sequence_number = 0
+        self._json_file = json_file
+        self._test_step_id_counter = 0
+        self._devs = devs
+        self._timestamp_format = "%Y-%m-%dT%H:%M:%S.%f%zZ"
+        self._result = "PASS"
+        self._error_messages = []
+
+    def gen_ocp_header(self):
+        output = {}
+        output['log'] = {}
+        output['log']['severity'] = "INFO"
+        output['log']['text'] = "test run started"
+        return output
+
+    def gen_ocp_start_test_run_artifact(step, filtered_duts):
+        output = {}
+        # Generate the testRunArtifact
+        output['testRunArtifact'] = {}
+        output['testRunArtifact']['testRunStart'] = {}
+        output['testRunArtifact']['testRunStart']['name'] = "pcicrawler"
+        output['testRunArtifact']['testRunStart']['version'] = ''
+        output['testRunArtifact']['testRunStart']['commandLine'] = ' '.join(sys.argv)
+        output['testRunArtifact']['testRunStart']['parameters'] = {}
+        output['testRunArtifact']['testRunStart']['dutInfo'] = {}
+        # filtered_duts
+        list_of_duts = []
+        for test_set in filtered_duts:
+            for dut in test_set.duts:
+                if dut not in list_of_duts:
+                    list_of_duts.append(dut)
+        hardware_info_id_count = 0
+        hardware_components = []
+        for dut in list_of_duts:
+            component = {}
+            component['hardwareInfoId'] = hardware_info_id_count
+            component['componentLocation'] = {}
+            component['componentLocation']['devLocation'] = str(dut)
+            hardware_components.append(component)
+            hardware_info_id_count += 1
+        output['testRunArtifact']['testRunStart']['dutInfo']['hostname'] =  socket.gethostname()
+        output['testRunArtifact']['testRunStart']['dutInfo']['hardware_components'] =  hardware_components
+        sw_info = {}
+        sw_info['softwareInfoId'] = 0
+        sw_info['name'] = "pcicrawler"
+        sw_info['version'] = ""
+
+        output['testRunArtifact']['testRunStart']['dutInfo']['softwareInfos'] = [sw_info]
+        output['testRunArtifact']['testRunStart']['dutInfo']['softwareInfos'] = []
+        output['testRunArtifact']['testRunStart']['dutInfo']['hardwareInfos'] = []
+        return output
+
+    def gen_ocp_end_test_run_artifact(self):
+        output = {}
+        # Generate the testRunArtifact
+        output['testRunArtifact'] = {}
+        output['testRunArtifact']['testRunEnd'] = {}
+        output['testRunArtifact']['testRunEnd']['status'] = "COMPLETE"
+        output['testRunArtifact']['testRunEnd']['result'] = self._result
+        return output
+
+    class OCPTestStep(object):
+        def __init__(self, test_step_id, device, expected_result, gen_json):
+            self._test_step_id = test_step_id
+            self._device = device
+            self._expected_result = expected_result
+            self._result = "PASS"
+            self._status = "RUNNING"
+            self._error_messages = []
+            self.gen_json = gen_json
+
+        def __enter__(self):
+            click.echo(json.dumps(self.gen_json(self.gen_ocp_start_test_step_artifact())))
+            return self
+
+        def __exit__(self, *args):
+            click.echo(json.dumps(self.gen_json(self.gen_ocp_end_test_step_artifact())))
+
+        @abstractmethod
+        def run(self, value):
+            click.echo(json.dumps(self.gen_json(self.gen_ocp_log_test_step_artifact("INFO", "Running test {} for device at {}.".format(
+                self._test_name,
+                self._device
+            )))))
+            if str(value) != str(self._expected_result):
+                # Set state to fail
+                self._result = "FAIL"
+                # Add failing device information to the link
+                click.echo(json.dumps(self.gen_json(self.gen_ocp_log_test_step_artifact("ERROR", "Test {} for device {}, expected {}, found {}.".format(
+                    self._test_name,
+                    self._device,
+                    self._expected_result,
+                    str(value))))))
+            return self._result
+
+        def gen_ocp_log_test_step_artifact(self, severity, text):
+            output= {}
+            output['testStepArtifact'] = {}
+            output['testStepArtifact']['log'] = {}
+            output['testStepArtifact']['log']['severity'] = severity
+            output['testStepArtifact']['log']['text'] = text
+            output['testStepArtifact']['testStepId'] = self._test_step_id
+            return output
+
+        def gen_ocp_start_test_step_artifact(self):
+            output = {}
+            output['testStepArtifact'] = {}
+            output['testStepArtifact']['testStepStart'] = {}
+            output['testStepArtifact']['testStepStart']['name'] = self._test_name
+            output['testStepArtifact']['testStepId'] = self._test_step_id
+            return output
+
+        def gen_ocp_end_test_step_artifact(self):
+            output = {}
+            output['testStepArtifact'] = {}
+            output['testStepArtifact']['testStepEnd'] = {}
+            output['testStepArtifact']['testStepEnd']['name'] = self._test_name
+            output['testStepArtifact']['testStepEnd']['status'] = 'COMPLETE'
+            return output
+
+
+    class check_location(OCPTestStep):
+        def __init__(self, test_step_id, device, expected_results):
+            self._test_name = "pci_location_check"
+            super().__init__(test_step_id, device, expected_results)
+
+        def run(self):
+            return super().run(self._device.location)
+
+
+    class check_vendor_id(OCPTestStep):
+        def __init__(self, test_step_id, device, expected_results, gen_json):
+            self._test_name = "pci_vendor_id_check"
+            super().__init__(test_step_id, device, expected_results, gen_json)
+
+        def run(self):
+            return super().run(self._device.vendor_id)
+
+
+    class check_device_id(OCPTestStep):
+        def __init__(self, test_step_id, device, expected_results, gen_json):
+            self._test_name = "pci_device_id_check"
+            super().__init__(test_step_id, device, expected_results, gen_json)
+
+        def run(self):
+            return super().run(self._device.device_id)
+
+
+    class check_class_id(OCPTestStep):
+        def __init__(self, test_step_id, device, expected_results, gen_json):
+            self._test_name = "pci_class_id_check"
+            super().__init__(test_step_id, device, expected_results, gen_json)
+
+        def run(self):
+            return super().run(self._device.class_id)
+
+
+    class check_physical_slot(OCPTestStep):
+        def __init__(self, test_step_id, device, expected_results, gen_json):
+            self._test_name = "pci_physical_slot_check"
+            super().__init__(test_step_id, device, expected_results, gen_json)
+
+        def run(self):
+            return super().run(self._device.express_slot.slot)
+
+
+    class check_current_link_speed(OCPTestStep):
+        def __init__(self, test_step_id, device, expected_results, gen_json):
+            self._test_name = "pci_current_link_speed_check"
+            super().__init__(test_step_id, device, expected_results, gen_json)
+
+        def run(self):
+            return super().run(self._device.express_link.cur_speed)
+
+
+    class check_current_link_width(OCPTestStep):
+        def __init__(self, test_step_id, device, expected_results, gen_json):
+            self._test_name = "pci_current_link_width_check"
+            super().__init__(test_step_id, device, expected_results, gen_json)
+
+        def run(self):
+            return super().run(self._device.express_link.cur_width)
+
+
+    class check_capable_link_speed(OCPTestStep):
+        def __init__(self, test_step_id, device, expected_results, gen_json):
+            self._test_name = "pci_capable_link_speed_check"
+            super().__init__(test_step_id, device, expected_results, gen_json)
+        
+        def run(self):
+            return super().run(self._device.express_link.capable_speed)
+
+
+    class check_capable_link_width(OCPTestStep):
+        def __init__(self, test_step_id, device, expected_results, gen_json):
+            self._test_name = "pci_capable_link_width_check"
+            super().__init__(test_step_id, device, expected_results, gen_json)
+        
+        def run(self):
+            return super().run(self._device.express_link.capable_width)
+
+
+    class check_address(OCPTestStep):
+        def __init__(self, test_step_id, device, expected_results, gen_json):
+            self._test_name = "pci_address_check"
+            super().__init__(test_step_id, device, expected_results, gen_json)
+
+        def run(self):
+            click.echo(json.dumps(self.gen_json(self.gen_ocp_log_test_step_artifact("INFO", "Running test {} for device at {}.".format(
+                self._test_name,
+                self._device
+            )))))
+            if str(self._device) not in str(self._expected_result):
+                # Set state to fail
+                self._result = "FAIL"
+                # Add failing device information to the link
+                click.echo(json.dumps(self.gen_json(self.gen_ocp_log_test_step_artifact("ERROR", "Test {} did not find {} in expected list {}".format(
+                    self._test_name,
+                    self._device,
+                    self._expected_result)))))
+            return self._result
+
+
+    class check_AER(OCPTestStep):
+        def __init__(self, test_step_id, device, expected_results, gen_json):
+            self._test_name = "pci_AER_check"
+            super().__init__(test_step_id, device, expected_results, gen_json)
+
+        def run(self):
+            return super().run(self._device.express_aer)
+
+
+    def gen_json(self, data):
+        data['sequenceNumber'] = self._sequence_number
+        self._sequence_number += 1
+        data['timestamp'] = datetime.utcnow().strftime(self._timestamp_format)
+        return data
+
+
+    class TestSet(object):
+        def __init__(self, duts, validate):
+            self.duts = duts
+            self.validators = validate
+
+        def __str__(self):
+            return str(self.duts)
+
+
+    def run(self):
+        duts = []
+        # Process input json
+        with open(self._json_file, 'r') as fh:
+            try:
+                input_json = json.load(fh)
+                duts = input_json['duts']
+            except Exception as _:
+                raise("ERROR: Cannot parse file {}".format(self._json_file))
+        filtered_duts = []
+        for dut in duts:
+            identifier = dut['identifiers']
+            potential_duts = list(self._devs)
+            # Go look for this device and get the data
+            if 'address' in identifier:
+                potential_duts = [dut for dut in potential_duts if str(dut) == identifier['address']]
+            if 'vendor_id' in identifier:
+                potential_duts = [dut for dut in potential_duts if dut.vendor_id == identifier['vendor_id']]
+            if 'device_id' in identifier:
+                potential_duts = [dut for dut in potential_duts if dut.device_id == identifier['device_id']]
+            if len(potential_duts) != 0:
+                filtered_duts.append(self.TestSet(potential_duts, dut['validate']))
+        # Print the header
+        click.echo(dumps(self.gen_json(self.gen_ocp_header())))
+        # Print test start
+        click.echo(dumps(self.gen_json(self.gen_ocp_start_test_run_artifact(filtered_duts))))
+        # Start checks
+        for test_set in filtered_duts:
+            # Run checks for each slot
+            for dut in test_set.duts:
+                if 'vendor_id' in test_set.validators:
+                    with self.check_vendor_id(
+                        self._test_step_id_counter, 
+                        dut,
+                        test_set.validators['vendor_id'],
+                        self.gen_json) as test:
+                        self._result = test.run()
+                    self._test_step_id_counter += 1
+                if 'device_id' in test_set.validators:
+                    with self.check_device_id(
+                        self._test_step_id_counter, 
+                        dut,
+                        test_set.validators['device_id'],
+                        self.gen_json) as test:
+                        self._result = test.run()
+                    self._test_step_id_counter += 1
+                if 'class_id' in test_set.validators:
+                    with self.check_class_id(
+                        self._test_step_id_counter, 
+                        dut,
+                        test_set.validators['class_id'],
+                        self.gen_json) as test:
+                        self._result = test.run()
+                    self._test_step_id_counter += 1
+                if 'physical_slot' in test_set.validators:
+                    with self.check_physical_slot(
+                        self._test_step_id_counter, 
+                        dut,
+                        test_set.validators['physical_slot'],
+                        self.gen_json) as test:
+                        self._result = test.run()
+                    self._test_step_id_counter += 1
+                if 'current_link_speed' in test_set.validators:
+                    with self.check_current_link_speed(
+                        self._test_step_id_counter, 
+                        dut,
+                        test_set.validators['current_link_speed'],
+                        self.gen_json) as test:
+                        self._result = test.run()
+                    self._test_step_id_counter += 1
+                if 'current_link_width' in test_set.validators:
+                    with self.check_current_link_width(
+                        self._test_step_id_counter,
+                        dut, 
+                        test_set.validators['current_link_width'], 
+                        self.gen_json) as test:
+                        self._result = test.run()
+                    self._test_step_id_counter += 1
+                if 'capable_link_speed' in test_set.validators:
+                    with self.check_capable_link_speed(
+                        self._test_step_id_counter,
+                        dut,
+                        test_set.validators['capable_link_speed'],
+                        self.gen_json) as test:
+                        self._result = test.run()
+                    self._test_step_id_counter += 1
+                if 'capable_link_width' in test_set.validators:
+                    with self.check_capable_link_width(
+                        self._test_step_id_counter,
+                        dut,
+                        test_set.validators['capable_link_width'],
+                        self.gen_json) as test:
+                        self._result = test.run()
+                    self._test_step_id_counter += 1
+                if 'addresses' in test_set.validators:
+                    with self.check_address(
+                        self._test_step_id_counter,
+                        dut,
+                        test_set.validators['addresses'],
+                        self.gen_json) as test:
+                        self._result = test.run()
+                    self._test_step_id_counter += 1
+                if 'check_aer' in test_set.validators:
+                    if test_set.validators['check_aer'] == True:
+                        with self.check_AER(
+                            self._test_step_id_counter,
+                            dut,
+                            None,
+                            self.gen_json) as test:
+                            self._result = test.run()
+                    self._test_step_id_counter += 1
+        # Print the footer
+        click.echo(dumps(self.gen_json(self.gen_ocp_end_test_run_artifact())))
 
 
 def print_tree_level(devgroups, indent, roots):  # noqa: C901
@@ -178,6 +547,13 @@ def is_physfn(device):
 @click.command()  # noqa: C901
 @click.option("--json/--no-json", "-j", default=False, help="Output in JSON format")
 @click.option(
+    "--ocp",
+    "-o",
+    default=None,
+    help="Run pcicrawler as an OCP diag. "
+    "Requires an input JSON file as an argument.",
+)
+@click.option(
     "--hexify/--no-hexify",
     "-x",
     default=False,
@@ -245,6 +621,7 @@ def is_physfn(device):
 )
 def main(
     json,
+    ocp,
     hexify,
     aer,
     tree,
@@ -316,6 +693,9 @@ def main(
         no_scripting()
         # When asked to print a tree, include filtered devices parents
         print_tree(sorted(devs, key=lambda d: d.device_name))
+    elif ocp:
+        ocp_obj = ocp_output_obj(devs, ocp)
+        ocp_obj.run()
     elif json:
         jdevs = {}
         for dev in devs:
