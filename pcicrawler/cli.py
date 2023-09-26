@@ -12,18 +12,11 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import copy
 import os
 import sys
-import socket
 from json import dumps
-import json
-from datetime import datetime
-from abc import abstractmethod
+import pkg_resources
 import click
-from typing import (
-    Set,
-    List,
-    Dict
-)
 import ocptv.output as tv
+from ocp_diag import OCPOutputObj
 from pci_lib import (
     defer_closes,
     get_dmidecode_pci_slots,
@@ -32,7 +25,6 @@ from pci_lib import (
     maybe_shorten_pci_addr,
     PCI_CLASS_MASKS,
     SYSFS_PCI_BUS_DEVICES,
-    PCIDevice
 )
 
 from pcicrawler.lib.constants import ROOT_UID_REQUIRED
@@ -72,283 +64,6 @@ def jsonify(dev, hexify=False, vpd=False, aer=False):
         if aer_info:
             jd["aer"] = aer_info
     return jd
-
-
-class ocp_output_obj(object):
-    def __init__(self,
-                 devs: Set[PCIDevice],
-                 json_file: str,
-                 ocp_run: tv.TestRun):
-        self._json_file = json_file
-        self._devs = devs
-        self._ocp_run = ocp_run
-
-    class OCPTestStep(object):
-        def __init__(self, device, expected_result, ocp_run):
-            self._device = device
-            self._expected_result = expected_result
-            self._ocp_run = ocp_run
-            self._error_messages = []
-
-        @abstractmethod
-        def run(self, value: str):
-            dut = tv.Dut(id=str(self._device), name="PCIe Device")
-            with self._ocp_run.scope(dut=dut):
-                step = self._ocp_run.add_step(self._test_name)
-                if str(value) != str(self._expected_result):
-                    step.add_diagnosis(tv.DiagnosisType.FAIL, 
-                                    verdict="Test {} for device {}, expected {}, found {}.".format(
-                                        self._test_name,
-                                        self._device,
-                                        self._expected_result,
-                                        str(value)))
-                else:
-                    step.add_diagnosis(tv.DiagnosisType.PASS, 
-                                    verdict="Test {} for device {} PASSED".format(
-                                        self._test_name,
-                                        self._device))
-
-
-    class check_location(OCPTestStep):
-        def __init__(self, 
-                     device: PCIDevice, 
-                     expected_results: str):
-            self._test_name = "pci_location_check"
-            super().__init__(device, expected_results)
-
-        def run(self):
-            return super().run(self._device.location)
-
-
-    class check_vendor_id(OCPTestStep):
-        def __init__(self,
-                     device: PCIDevice,
-                     expected_results: str,
-                     ocp_run: tv.TestRun):
-            self._test_name = "pci_vendor_id_check"
-            super().__init__(device, expected_results, ocp_run)
-
-        def run(self):
-            return super().run(self._device.vendor_id)
-
-
-    class check_device_id(OCPTestStep):
-        def __init__(self,
-                     device: PCIDevice,
-                     expected_results: str,
-                     ocp_run: tv.TestRun):
-            self._test_name = "pci_device_id_check"
-            super().__init__(device, expected_results, ocp_run)
-
-        def run(self):
-            return super().run(self._device.device_id)
-
-
-    class check_class_id(OCPTestStep):
-        def __init__(self,
-                     device: PCIDevice,
-                     expected_results: str,
-                     ocp_run: tv.TestRun):
-            self._test_name = "pci_class_id_check"
-            super().__init__(device, expected_results, ocp_run)
-
-        def run(self):
-            return super().run(self._device.class_id)
-
-
-    class check_physical_slot(OCPTestStep):
-        def __init__(self,
-                     device: PCIDevice,
-                     expected_results: str,
-                     ocp_run: tv.TestRun):
-            self._test_name = "pci_physical_slot_check"
-            super().__init__(device, expected_results, ocp_run)
-
-        def run(self):
-            return super().run(self._device.express_slot.slot)
-
-
-    class check_current_link_speed(OCPTestStep):
-        def __init__(self,
-                     device: PCIDevice,
-                     expected_results: str,
-                     ocp_run: tv.TestRun):
-            self._test_name = "pci_current_link_speed_check"
-            super().__init__(device, expected_results, ocp_run)
-
-        def run(self):
-            return super().run(self._device.express_link.cur_speed)
-
-
-    class check_current_link_width(OCPTestStep):
-        def __init__(self,
-                     device: PCIDevice,
-                     expected_results: str,
-                     ocp_run: tv.TestRun):
-            self._test_name = "pci_current_link_width_check"
-            super().__init__(device, expected_results, ocp_run)
-
-        def run(self):
-            return super().run(self._device.express_link.cur_width)
-
-
-    class check_capable_link_speed(OCPTestStep):
-        def __init__(self,
-                     device: PCIDevice,
-                     expected_results: str,
-                     ocp_run: tv.TestRun):
-            self._test_name = "pci_capable_link_speed_check"
-            super().__init__(device, expected_results, ocp_run)
-        
-        def run(self):
-            return super().run(self._device.express_link.capable_speed)
-
-
-    class check_capable_link_width(OCPTestStep):
-        def __init__(self,
-                     device: PCIDevice,
-                     expected_results: str,
-                     ocp_run: tv.TestRun):
-            self._test_name = "pci_capable_link_width_check"
-            super().__init__(device, expected_results, ocp_run)
-        
-        def run(self):
-            return super().run(self._device.express_link.capable_width)
-
-
-    class check_address(OCPTestStep):
-        def __init__(self,
-                     device: PCIDevice,
-                     expected_results: str,
-                     ocp_run: tv.TestRun):
-            self._test_name = "pci_address_check"
-            super().__init__(device, expected_results, ocp_run)
-
-        def run(self):
-            dut = tv.Dut(id=str(self._device), name="PCIe Device")
-            with self._ocp_run.scope(dut=dut):
-                step = self._ocp_run.add_step(self._test_name)
-                if str(self._device) not in str(self._expected_result):
-                    step.add_diagnosis(tv.DiagnosisType.FAIL, 
-                                    verdict="Test {} did not find {} in expected list {}.".format(
-                                        self._test_name,
-                                        self._device,
-                                        self._expected_result))
-                else:
-                    step.add_diagnosis(tv.DiagnosisType.PASS, 
-                                    verdict="Test {} for device {} PASSED".format(
-                                        self._test_name,
-                                        self._device))
-
-
-    class check_AER(OCPTestStep):
-        def __init__(self,
-                     device: PCIDevice,
-                     expected_results: str,
-                     ocp_run: tv.TestRun):
-            self._test_name = "pci_AER_check"
-            super().__init__(device, expected_results, ocp_run)
-
-        def run(self):
-            return super().run(self._device.express_aer)
-
-
-    class TestSet(object):
-        def __init__(self, duts: List[List[PCIDevice]], validate: Dict):
-            self.duts = duts
-            self.validators = validate
-
-        def __str__(self):
-            return str(self.duts)
-
-
-    def run(self):
-        duts = []
-        # Process input json
-        with open(self._json_file, 'r') as fh:
-            try:
-                input_json = json.load(fh)
-                duts = input_json['duts']
-            except Exception as _:
-                raise("ERROR: Cannot parse file {}".format(self._json_file))
-        filtered_duts = []
-        for dut in duts:
-            identifier = dut['identifiers']
-            potential_duts = list(self._devs)
-            # Go look for this device and get the data
-            if 'address' in identifier:
-                potential_duts = [dut for dut in potential_duts if str(dut) == identifier['address']]
-            if 'vendor_id' in identifier:
-                potential_duts = [dut for dut in potential_duts if dut.vendor_id == identifier['vendor_id']]
-            if 'device_id' in identifier:
-                potential_duts = [dut for dut in potential_duts if dut.device_id == identifier['device_id']]
-            if len(potential_duts) != 0:
-                filtered_duts.append(self.TestSet(potential_duts, dut['validate']))
-        # Start checks
-        for test_set in filtered_duts:
-            # Run checks for each slot
-            for dut in test_set.duts:
-                if 'vendor_id' in test_set.validators:
-                    test = self.check_vendor_id(
-                        dut,
-                        test_set.validators['vendor_id'],
-                        self._ocp_run)
-                    self._result = test.run()
-                if 'device_id' in test_set.validators:
-                    test = self.check_device_id(
-                        dut,
-                        test_set.validators['device_id'],
-                        self._ocp_run)
-                    self._result = test.run()
-                if 'class_id' in test_set.validators:
-                    test = self.check_class_id(
-                        dut,
-                        test_set.validators['class_id'],
-                        self._ocp_run)
-                    self._result = test.run()
-                if 'physical_slot' in test_set.validators:
-                    test = self.check_physical_slot(
-                        dut,
-                        test_set.validators['physical_slot'],
-                        self._ocp_run)
-                    self._result = test.run()
-                if 'current_link_speed' in test_set.validators:
-                    test = self.check_current_link_speed(
-                        dut,
-                        test_set.validators['current_link_speed'],
-                        self._ocp_run)
-                    self._result = test.run()
-                if 'current_link_width' in test_set.validators:
-                    test = self.check_current_link_width(
-                        dut, 
-                        test_set.validators['current_link_width'], 
-                        self._ocp_run)
-                    self._result = test.run()
-                if 'capable_link_speed' in test_set.validators:
-                    test = self.check_capable_link_speed(
-                        dut,
-                        test_set.validators['capable_link_speed'],
-                        self._ocp_run)
-                    self._result = test.run()
-                if 'capable_link_width' in test_set.validators:
-                    test = self.check_capable_link_width(
-                        dut,
-                        test_set.validators['capable_link_width'],
-                        self._ocp_run)
-                    self._result = test.run()
-                if 'addresses' in test_set.validators:
-                    test = self.check_address(
-                        dut,
-                        test_set.validators['addresses'],
-                        self._ocp_run)
-                    self._result = test.run()
-                if 'check_aer' in test_set.validators:
-                    if test_set.validators['check_aer'] == True:
-                        test = self.check_AER(
-                            dut,
-                            None,
-                            self._ocp_run)
-                        self._result = test.run()
 
 
 def print_tree_level(devgroups, indent, roots):  # noqa: C901
@@ -465,7 +180,6 @@ def is_physfn(device):
 @click.option("--json/--no-json", "-j", default=False, help="Output in JSON format")
 @click.option(
     "--ocp",
-    "-o",
     default=None,
     help="Run pcicrawler as an OCP diag. "
     "Requires an input JSON file as an argument.",
@@ -611,8 +325,8 @@ def main(
         # When asked to print a tree, include filtered devices parents
         print_tree(sorted(devs, key=lambda d: d.device_name))
     elif ocp:
-        run = tv.TestRun(name="pcicrawler", version="")
-        ocp_obj = ocp_output_obj(devs, ocp, run)
+        run = tv.TestRun(name="pcicrawler", version=pkg_resources.get_distribution("pcicrawler").version)
+        ocp_obj = OCPOutputObj(devs, ocp, run)
         ocp_obj.run()
     elif json:
         jdevs = {}

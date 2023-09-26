@@ -31,6 +31,7 @@ VERSION = None
 REQUIRED = [
     "click",
     "six",
+    "ocptv",
 ]
 
 # What packages are optional?
