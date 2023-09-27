@@ -6,6 +6,8 @@ LICENSE file in the root directory of this source tree.
 """
 
 import json
+import socket
+import pkg_resources
 import typing as ty
 import ocptv.output as tv
 from pci_lib import PCIDevice
@@ -29,21 +31,21 @@ class OCPTestStep:
 
     @abstractmethod
     def run(self, current_value: str):
-        dut = tv.Dut(id=str(self._device), name="PCIe Device")
-        with self._ocp_run.scope(dut=dut):
-            step = self._ocp_run.add_step(self._test_name)
-            if str(current_value) != str(self._expected_result):
-                step.add_diagnosis(tv.DiagnosisType.FAIL, 
-                                verdict="Test {} for device {}, expected {}, found {}.".format(
-                                    self._test_name,
-                                    self._device,
-                                    self._expected_result,
-                                    str(current_value)))
-            else:
-                step.add_diagnosis(tv.DiagnosisType.PASS, 
-                                verdict="Test {} for device {} PASSED".format(
-                                    self._test_name,
-                                    self._device))
+        step = self._ocp_run.add_step(self._test_name)
+        if str(current_value) != str(self._expected_result):
+            step.add_diagnosis(tv.DiagnosisType.FAIL, 
+                            verdict="Test {} for device {}, expected {}, found {}.".format(
+                                self._test_name,
+                                self._device,
+                                self._expected_result,
+                                str(current_value)))
+            return False
+        else:
+            step.add_diagnosis(tv.DiagnosisType.PASS, 
+                            verdict="Test {} for device {} PASSED".format(
+                                self._test_name,
+                                self._device))
+            return True
 
 
 class CheckLocation(OCPTestStep):
@@ -179,6 +181,7 @@ class OCPOutputObj:
         self._json_path = json_path
         self._devs = devs
         self._ocp_run = ocp_run
+        self._result = True
 
     def run(self):
         duts = []
@@ -194,27 +197,61 @@ class OCPOutputObj:
             identifier = dut['identifiers']
             potential_duts = list(self._devs)
             # Go look for this device and get the data
+            missing_devices = []
             if 'address' in identifier:
+                if identifier['address'] not in potential_duts:
+                    missing_devices.append("No device was found with address {}.".format(identifier['address']))
                 potential_duts = [dut for dut in potential_duts if str(dut) == identifier['address']]
             if 'vendor_id' in identifier:
                 potential_duts = [dut for dut in potential_duts if dut.vendor_id == identifier['vendor_id']]
+                if len(potential_duts) == 0:
+                    missing_devices.append("No device was found with vendor id {}.".format(identifier['vendor_id']))
             if 'device_id' in identifier:
                 potential_duts = [dut for dut in potential_duts if dut.device_id == identifier['device_id']]
+                if len(potential_duts) == 0:
+                    missing_devices.append("No device was found with device id {}.".format(identifier['device_id']))
             if len(potential_duts) != 0:
                 filtered_duts.append(TestSet(potential_duts, dut['validate']))
-                
-        # Start checks
+
+        # Create the dut information for the test run
+        dut = tv.Dut(id="0", name=socket.gethostname())
+        devices_seen = []
         for test_set in filtered_duts:
-            # Run checks for each slot
-            for dut in test_set.duts:
-                for test_name in AVAILABLE_TESTS:
-                    if test_name in test_set.conditions:
-                        conditions = test_set.conditions[test_name]
-                        if test_name == 'check_AER':
-                            conditions = None
-                        test = AVAILABLE_TESTS[test_name](
-                            dut,
-                            conditions,
-                            self._ocp_run
-                        )
-                        self._result = test.run()
+            for pcie_device in test_set.duts:
+                if pcie_device not in devices_seen:
+                    devices_seen.append(pcie_device)
+                    dut.add_hardware_info(name=pcie_device.name,
+                                          location=str(pcie_device.location),
+                                          manufacturer=str(pcie_device.vendor_id),
+                                          )
+        dut.add_software_info(name="pcicrawler",
+                              revision=pkg_resources.get_distribution("pcicrawler").version)
+
+        # Start checks
+        with self._ocp_run.scope(dut=dut):
+            # First we can list out the missing devices
+            if len(missing_devices) > 0:
+                self._result = False
+                for missing_device_msg in missing_devices:
+                    self._ocp_run.add_log(tv.objects.LogSeverity.ERROR, missing_device_msg)
+            for test_set in filtered_duts:
+                # Run checks for each slot
+                for dut in test_set.duts:
+                    # Run available tests
+                    for test_name in AVAILABLE_TESTS:
+                        if test_name in test_set.conditions:
+                            conditions = test_set.conditions[test_name]
+                            if test_name == 'check_AER':
+                                conditions = None
+                            test = AVAILABLE_TESTS[test_name](
+                                dut,
+                                conditions,
+                                self._ocp_run
+                            )
+                            result = test.run()
+                            if not self._result and not result:
+                                self._result = result
+                                
+            if not self._result:
+                raise tv.TestRunError(status=tv.objects.TestStatus.COMPLETE,
+                                        result=tv.objects.TestResult.FAIL)
