@@ -14,10 +14,10 @@ import typing as ty
 import ocptv.output as tv
 from dataclasses import dataclass
 from pci_lib import PCIDevice
-from abc import abstractmethod
+from abc import ABCMeta, abstractmethod
 
 
-class OCPTestStep:
+class OCPTestStep(metaclass=ABCMeta):
     def __init__(self,
                     device: PCIDevice,
                     expected_result: str,
@@ -35,14 +35,14 @@ class OCPTestStep:
     def run(self, current_value: str):
         step = self._ocp_run.add_step(self._test_name)
         if str(current_value) != str(self._expected_result):
-            step.add_diagnosis(tv.DiagnosisType.FAIL, 
+            step.add_diagnosis(tv.DiagnosisType.FAIL,
                             verdict="Test {} for device {}, expected {}, found {}.".format(
                                 self._test_name,
                                 self._device,
                                 self._expected_result,
                                 str(current_value)))
             return False
-        step.add_diagnosis(tv.DiagnosisType.PASS, 
+        step.add_diagnosis(tv.DiagnosisType.PASS,
                         verdict="Test {} for device {} PASSED".format(
                             self._test_name,
                             self._device))
@@ -100,14 +100,14 @@ class CheckCurrentLinkWidth(OCPTestStep):
 
 class CheckCapableLinkSpeed(OCPTestStep):
     _test_name = "pci_capable_link_speed_check"
-    
+
     def run(self):
         return super().run(self._device.express_link.capable_speed)
 
 
 class CheckCapableLinkWidth(OCPTestStep):
     _test_name = "pci_capable_link_width_check"
-    
+
     def run(self):
         return super().run(self._device.express_link.capable_width)
 
@@ -120,13 +120,13 @@ class CheckAddress(OCPTestStep):
         with self._ocp_run.scope(dut=dut):
             step = self._ocp_run.add_step(self._test_name)
             if str(self._device) not in str(self._expected_result):
-                step.add_diagnosis(tv.DiagnosisType.FAIL, 
+                step.add_diagnosis(tv.DiagnosisType.FAIL,
                                 verdict="Test {} did not find {} in expected list {}.".format(
                                     self._test_name,
                                     self._device,
                                     self._expected_result))
                 return False
-            step.add_diagnosis(tv.DiagnosisType.PASS, 
+            step.add_diagnosis(tv.DiagnosisType.PASS,
                             verdict="Test {} for device {} PASSED".format(
                                 self._test_name,
                                 self._device))
@@ -148,7 +148,7 @@ class CheckAER(OCPTestStep):
 
 @dataclass
 class TestSet:
-    '''Object to hold a list of DUTs to be tested and 
+    '''Object to hold a list of DUTs to be tested and
     the values they need to be compared against.'''
     duts: list
     conditions: dict
@@ -174,14 +174,13 @@ AVAILABLE_TESTS = {
 
 
 class OCPOutputObj:
-    def __init__(self,
+    def _   _init__(self,
                  devs: ty.Set[PCIDevice],
                  json_path: str,
                  ocp_run: tv.TestRun):
         self._json_path = json_path
         self._devs = devs
         self._ocp_run = ocp_run
-        self._result = True
 
     def run(self):
         duts = []
@@ -234,7 +233,7 @@ class OCPOutputObj:
 
         # Start checks
         if len(missing_devices) > 0:
-            self._result = False
+            diag_passed = False
             for missing_device_msg in missing_devices:
                 self._ocp_run.add_log(tv.objects.LogSeverity.ERROR, missing_device_msg)
         with self._ocp_run.scope(dut=dut):
@@ -254,9 +253,9 @@ class OCPOutputObj:
                                 self._ocp_run
                             )
                             result = test.run()
-                            if self._result and not result:
-                                self._result = result
-                                
-            if not self._result:
+                            if diag_passed and not result:
+                                diag_passed = result
+
+            if not diag_passed:
                 raise tv.TestRunError(status=tv.objects.TestStatus.COMPLETE,
                                         result=tv.objects.TestResult.FAIL)
