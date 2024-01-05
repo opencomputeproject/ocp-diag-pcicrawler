@@ -25,8 +25,6 @@ from pci_lib import (
     SYSFS_PCI_BUS_DEVICES,
 )
 
-from pcicrawler.lib.constants import ROOT_UID_REQUIRED
-
 
 def jsonify(dev, hexify=False, vpd=False, aer=False):
     jd = dev._asdict()
@@ -137,6 +135,7 @@ def print_tree_level(devgroups, indent, roots):  # noqa: C901
 
 def print_tree(devs):
     roots = []
+
     devgroups = {}
     for dev in devs:
         parent = dev.parent
@@ -146,10 +145,23 @@ def print_tree(devs):
                 devgroups[parentid].append(dev)
             else:
                 devgroups[parentid] = [dev]
-        # Only find devices under a root port (don't display built-in "devices"
-        # in the tree view)
-        elif dev.express_type == "root_port":
-            roots.append(dev)
+
+    # Only find devices under a root port (don't display built-in "devices"
+    # in the tree view)
+    # Without sudo access it is not really easy (or possible???) to know
+    # if something is a root port. So we use the heuristic:
+    #   * Root ports have children
+    #   * Root ports do not have parents
+    # This will find root ports that have devices connected to them
+    roots = sorted(set(
+        d.parent
+        for d in devs
+        if d.parent is not None and d.parent.parent is None
+    ) | set(
+        d
+        for d in devs
+        if d.express_type == "root_port"
+    ))
     print_tree_level(devgroups, "", roots)
 
 
@@ -262,11 +274,8 @@ def main(
     Tool to display/filter/export information about PCI or PCI Express devices,
     as well as their topology.
 
-    Must run as root as it uses privileged sysfs entries.
+    Run as root to get more information using privileged sysfs entries.
     """
-    if os.geteuid() != 0:
-        print("error: pcicrawler must be run as root.", file=sys.stderr)
-        sys.exit(ROOT_UID_REQUIRED)
 
     vid = None
     did = None
