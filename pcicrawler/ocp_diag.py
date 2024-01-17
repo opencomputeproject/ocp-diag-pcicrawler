@@ -81,7 +81,9 @@ class CheckPhysicalSlot(OCPTestStep):
     _test_name = "pci_physical_slot_check"
 
     def run(self):
-        return super().run(self._device.express_slot.slot)
+       if self._device.express_slot is None:
+           return False  # can also trigger skip if there's an input param saying that it's acceptable to run this against a simple pci device (per the discussion last week about step skip semantics)
+       return super().run(self._device.express_slot.slot)
 
 
 class CheckCurrentLinkSpeed(OCPTestStep):
