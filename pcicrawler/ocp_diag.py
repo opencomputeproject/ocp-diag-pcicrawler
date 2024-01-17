@@ -174,7 +174,7 @@ AVAILABLE_TESTS = {
 
 
 class OCPOutputObj:
-    def _   _init__(self,
+    def __init__(self,
                  devs: ty.Set[PCIDevice],
                  json_path: str,
                  ocp_run: tv.TestRun):
