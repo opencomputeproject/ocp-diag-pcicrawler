@@ -153,8 +153,11 @@ def find_capability(config, cap):
             )
             return None
         config.been_there[pos] = True
-        pos = read_u8(config, pos)
-        cap_id = read_u8(config, pos)
+        try:
+            pos = read_u8(config, pos)
+            cap_id = read_u8(config, pos)
+        except Exception:
+            continue
         if cap_id == cap:
             return pos
         pos += 1
@@ -619,7 +622,10 @@ class PCIDevice(
 def get_dmidecode_pci_slots():
     slotmap = {}
     try:
-        dmiout = subprocess.check_output(["/sbin/dmidecode", "-t", "slot"])
+        dmiout = subprocess.check_output(
+            ["/sbin/dmidecode", "-t", "slot"],
+            stderr=subprocess.DEVNULL,
+        )
         dmiout = dmiout.decode("utf-8")
         slots = []
         slot = None
