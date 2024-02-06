@@ -180,7 +180,7 @@ EXPRESS_TYPES = {
     0xA: "root_complex_event_collector",
 }
 
-EXPRESS_SPEED = {1: "2.5GT/s", 2: "5GT/s", 3: "8GT/s", 4: "16GT/s", 5: "32GT/s"}
+EXPRESS_SPEED = {1: "2.5GT/s", 2: "5GT/s", 3: "8GT/s", 4: "16GT/s", 5: "32GT/s", 6: "64GT/s"}
 
 
 PCIExpressLink = namedtuple(
@@ -599,7 +599,6 @@ class PCIDevice(
                 target_speed = None
                 if lnkctl2 is not None:
                     target_speed = EXPRESS_SPEED.get(lnkctl2 & 0xF, None)
-
                 return PCIExpressLink(
                     cur_speed, cur_width, capable_speed, capable_width, target_speed
                 )
