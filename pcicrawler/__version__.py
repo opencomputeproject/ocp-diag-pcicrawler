@@ -7,6 +7,6 @@ LICENSE file in the root directory of this source tree.
 
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-VERSION = (0, 2, 0)
+VERSION = (0, 3, 0)
 
 __version__ = ".".join(map(str, VERSION))

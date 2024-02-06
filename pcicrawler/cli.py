@@ -13,8 +13,10 @@ import copy
 import os
 import sys
 from json import dumps
-
+import pkg_resources
 import click
+import ocptv.output as tv
+from ocp_diag import OCPOutputObj
 from pci_lib import (
     defer_closes,
     get_dmidecode_pci_slots,
@@ -26,7 +28,6 @@ from pci_lib import (
 )
 
 from pcicrawler.lib.constants import ROOT_UID_REQUIRED
-
 
 def jsonify(dev, hexify=False, vpd=False, aer=False):
     jd = dev._asdict()
@@ -178,6 +179,12 @@ def is_physfn(device):
 @click.command()  # noqa: C901
 @click.option("--json/--no-json", "-j", default=False, help="Output in JSON format")
 @click.option(
+    "--ocp",
+    default=None,
+    help="Run pcicrawler as an OCP diag. "
+    "Requires an input JSON file as an argument.",
+)
+@click.option(
     "--hexify/--no-hexify",
     "-x",
     default=False,
@@ -245,6 +252,7 @@ def is_physfn(device):
 )
 def main(
     json,
+    ocp,
     hexify,
     aer,
     tree,
@@ -316,6 +324,10 @@ def main(
         no_scripting()
         # When asked to print a tree, include filtered devices parents
         print_tree(sorted(devs, key=lambda d: d.device_name))
+    elif ocp:
+        run = tv.TestRun(name="pcicrawler", version=pkg_resources.get_distribution("pcicrawler").version)
+        ocp_obj = OCPOutputObj(devs, ocp, run)
+        ocp_obj.run()
     elif json:
         jdevs = {}
         for dev in devs:
